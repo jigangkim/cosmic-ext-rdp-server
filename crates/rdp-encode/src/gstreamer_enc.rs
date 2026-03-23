@@ -45,6 +45,19 @@ impl std::fmt::Display for EncoderType {
     }
 }
 
+impl std::str::FromStr for EncoderType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "vaapi" => Ok(Self::Vaapi),
+            "nvenc" => Ok(Self::Nvenc),
+            "software" | "x264" => Ok(Self::Software),
+            other => Err(format!("unknown encoder type: {other}")),
+        }
+    }
+}
+
 /// Check if a `GStreamer` element factory is available.
 #[must_use]
 pub fn is_encoder_available(element_name: &str) -> bool {

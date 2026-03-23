@@ -281,6 +281,8 @@ pub struct LiveDisplay {
     /// EGFX controller for H.264 delivery and resize (optional).
     /// Retained across connections (cloned into `LiveDisplayUpdates`).
     egfx: Option<EgfxController>,
+    /// Preferred encoder type from config (`None` = auto-detect).
+    encoder_type: Option<rdp_encode::EncoderType>,
 }
 
 impl LiveDisplay {
@@ -296,7 +298,13 @@ impl LiveDisplay {
                 event_rx: Some(event_rx),
             })),
             egfx: None,
+            encoder_type: None,
         }
+    }
+
+    /// Set the preferred encoder type from config.
+    pub fn set_encoder_type(&mut self, encoder_type: Option<rdp_encode::EncoderType>) {
+        self.encoder_type = encoder_type;
     }
 
     /// Attach an EGFX controller for H.264 frame delivery.
@@ -346,6 +354,7 @@ impl RdpServerDisplay for LiveDisplay {
             encoder_height: 0,
             frame_timestamp_ms: 0,
             egfx_wait_frames: 0,
+            encoder_type: self.encoder_type,
         }))
     }
 
@@ -424,6 +433,8 @@ struct LiveDisplayUpdates {
     /// After a timeout, fall back to bitmap delivery even if EGFX never
     /// negotiates (e.g. client connected with /gfx:off).
     egfx_wait_frames: u32,
+    /// Preferred encoder type from config (`None` = auto-detect).
+    encoder_type: Option<rdp_encode::EncoderType>,
 }
 
 impl Drop for LiveDisplayUpdates {
@@ -463,6 +474,7 @@ impl RdpServerDisplayUpdates for LiveDisplayUpdates {
                         &mut self.encoder_height,
                         &mut self.frame_timestamp_ms,
                         &frame,
+                        self.encoder_type,
                     ) {
                         continue;
                     }
@@ -498,6 +510,7 @@ impl RdpServerDisplayUpdates for LiveDisplayUpdates {
                         &mut self.encoder_height,
                         &mut self.frame_timestamp_ms,
                         &frame,
+                        self.encoder_type,
                     ) {
                         continue;
                     }
@@ -529,6 +542,7 @@ fn try_send_egfx_frame(
     encoder_height: &mut u32,
     timestamp_ms: &mut u32,
     frame: &CapturedFrame,
+    preferred_encoder: Option<rdp_encode::EncoderType>,
 ) -> bool {
     let Some(egfx) = egfx else {
         return false;
@@ -559,6 +573,7 @@ fn try_send_egfx_frame(
         let config = EncoderConfig {
             width: frame.width,
             height: frame.height,
+            encoder_type: preferred_encoder,
             ..EncoderConfig::default()
         };
         match GstEncoder::new(&config) {
