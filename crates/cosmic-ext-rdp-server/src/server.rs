@@ -600,6 +600,14 @@ fn try_send_egfx_frame(
         }
     }
 
+    // Skip encoding entirely when the EGFX channel is backlogged.
+    // This avoids wasting CPU/GPU on frames that would be dropped by
+    // send_frame's pending-frames check anyway.
+    if egfx.is_backpressured() {
+        tracing::trace!("EGFX: channel backpressured, skipping encode");
+        return true;
+    }
+
     let enc = h264_encoder.as_mut().expect("encoder just initialized");
 
     match enc.encode_frame(&frame.data) {

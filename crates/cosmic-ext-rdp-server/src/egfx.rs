@@ -18,6 +18,7 @@
 //! - [`CosmicGfxFactory`] – implements [`GfxServerFactory`] to create
 //!   the bridge/handler and receive the server event sender.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ironrdp_core::encode_vec;
@@ -56,6 +57,12 @@ fn dvc_to_svc_messages(dvc_messages: Vec<DvcMessage>) -> Vec<SvcMessage> {
         .collect()
 }
 
+/// Maximum number of unacknowledged EGFX frames before we start dropping.
+/// This provides application-level backpressure independent of the upstream
+/// `should_backpressure()` which is ineffective when `ack_suspended` is true
+/// (common with Windows mstsc sending `queue_depth = 0xFFFFFFFF`).
+const MAX_PENDING_FRAMES: u32 = 10;
+
 /// Shared inner state between the GFX handler, controller, and factory.
 struct EgfxInner {
     /// Shared handle to the `GraphicsPipelineServer` (same one inside `GfxDvcBridge`).
@@ -69,6 +76,10 @@ struct EgfxInner {
     /// Set `true` after `resize()` so the encoder forces an IDR keyframe
     /// on the next frame, ensuring the client can decode immediately.
     needs_keyframe: bool,
+    /// Number of EGFX frames sent but not yet acknowledged by the client.
+    /// Used for application-level backpressure when `ack_suspended` disables
+    /// the upstream backpressure mechanism.
+    pending_frames: Arc<AtomicU32>,
 }
 
 /// Thread-safe shared EGFX state.
@@ -132,6 +143,12 @@ impl GraphicsPipelineHandler for CosmicGfxHandler {
 
     fn on_frame_ack(&mut self, frame_id: u32, queue_depth: u32) {
         tracing::trace!(frame_id, queue_depth, "EGFX: frame acknowledged");
+        let inner = lock_shared(&self.shared);
+        // Saturating subtract: counter may drift slightly if acks arrive for
+        // frames sent before the last reset.
+        inner.pending_frames.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+            Some(n.saturating_sub(1))
+        }).ok();
     }
 }
 
@@ -174,6 +191,7 @@ impl EgfxController {
         inner.surface_id = None;
         inner.supports_avc420 = false;
         inner.needs_keyframe = false;
+        inner.pending_frames.store(0, Ordering::Relaxed);
         // The GraphicsPipelineServer is recreated by the factory for each
         // connection (via build_server_with_handle), so we just clear our handle.
         inner.server_handle = None;
@@ -202,6 +220,17 @@ impl EgfxController {
         lock_shared(&self.shared).supports_avc420
     }
 
+    /// Whether the EGFX channel is backpressured.
+    ///
+    /// Returns `true` when too many frames are pending acknowledgment,
+    /// indicating that the caller should skip encoding to avoid wasting
+    /// CPU/GPU resources on frames that would be dropped.
+    #[must_use]
+    pub fn is_backpressured(&self) -> bool {
+        let inner = lock_shared(&self.shared);
+        inner.pending_frames.load(Ordering::Relaxed) >= MAX_PENDING_FRAMES
+    }
+
     /// Send an H.264 frame through the EGFX channel.
     ///
     /// Locks the shared state, calls `send_avc420_frame` on the
@@ -226,6 +255,15 @@ impl EgfxController {
             return false;
         };
         let event_tx = event_tx.clone();
+        let pending = Arc::clone(&inner.pending_frames);
+
+        // Application-level backpressure: skip when too many frames are
+        // unacknowledged.  This catches cases where the upstream
+        // `should_backpressure()` is ineffective (ack_suspended = true).
+        if pending.load(Ordering::Relaxed) >= MAX_PENDING_FRAMES {
+            tracing::trace!("EGFX: app-level backpressure, dropping frame");
+            return false;
+        }
 
         let Some(surface_id) = inner.surface_id else {
             return false;
@@ -272,6 +310,7 @@ impl EgfxController {
             return false;
         }
 
+        pending.fetch_add(1, Ordering::Relaxed);
         true
     }
 
@@ -385,6 +424,7 @@ pub fn create_egfx(width: u16, height: u16) -> (CosmicGfxFactory, EgfxController
         height,
         event_tx: None,
         needs_keyframe: false,
+        pending_frames: Arc::new(AtomicU32::new(0)),
     }));
 
     let factory = CosmicGfxFactory {

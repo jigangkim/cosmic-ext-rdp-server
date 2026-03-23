@@ -326,6 +326,16 @@ fn build_pipeline(
         .do_timestamp(true)
         .build();
 
+    // Limit internal queue to 2 buffers to prevent unbounded memory growth.
+    // Without this, if the encoder falls behind (GPU init, caps negotiation,
+    // multi-monitor compositor producing >30fps), raw frames (~8-16 MB each)
+    // pile up in AppSrc's queue at hundreds of MB/s.  With leaky-downstream,
+    // the oldest queued buffer is dropped when the limit is hit.
+    // Set as GObject properties because the builder doesn't expose these in
+    // gstreamer-app 0.23.
+    appsrc.set_property("max-buffers", 2u64);
+    appsrc.set_property_from_str("leaky-type", "downstream");
+
     // videoconvert: RGB→YUV color space conversion.
     let videoconvert = make_element("videoconvert", "convert")?;
 
@@ -427,7 +437,7 @@ fn configure_encoder(encoder: &gst::Element, encoder_type: EncoderType, config: 
             let gop = config.keyframe_interval as i32;
             encoder.set_property("gop-size", gop);
             if config.low_latency {
-                encoder.set_property_from_str("preset", "low-latency-hq");
+                encoder.set_property_from_str("preset", "low-latency-hp");
                 encoder.set_property("zerolatency", true);
             }
         }
