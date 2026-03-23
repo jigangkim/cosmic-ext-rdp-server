@@ -59,8 +59,9 @@ pub async fn start_capture(
     restore_token: Option<&str>,
     channel_capacity: usize,
     swap_colors: bool,
+    multi_monitor: bool,
 ) -> Result<(CaptureHandle, mpsc::Receiver<CaptureEvent>, DesktopInfo), CaptureError> {
-    let portal_session = start_screencast(restore_token, true, false)
+    let portal_session = start_screencast(restore_token, true, multi_monitor)
         .await
         .map_err(CaptureError::Portal)?;
 

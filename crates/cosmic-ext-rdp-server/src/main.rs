@@ -235,6 +235,7 @@ async fn run_live_or_fallback(
         restore_token.as_deref(),
         cfg.capture.channel_capacity,
         cfg.capture.swap_colors,
+        cfg.capture.multi_monitor,
     )
     .await
     {
