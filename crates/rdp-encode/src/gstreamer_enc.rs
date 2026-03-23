@@ -401,11 +401,11 @@ fn configure_encoder(encoder: &gst::Element, encoder_type: EncoderType, config: 
 
     match encoder_type {
         EncoderType::Vaapi => {
-            encoder.set_property("rate-control", 2u32); // CBR
+            encoder.set_property_from_str("rate-control", "cbr");
             encoder.set_property("bitrate", bitrate_kbps);
             encoder.set_property("keyframe-period", config.keyframe_interval);
             if config.low_latency {
-                encoder.set_property("tune", 3u32); // low-latency
+                encoder.set_property_from_str("tune", "low-power");
             }
         }
         EncoderType::Nvenc => {
@@ -414,7 +414,7 @@ fn configure_encoder(encoder: &gst::Element, encoder_type: EncoderType, config: 
             let gop = config.keyframe_interval as i32;
             encoder.set_property("gop-size", gop);
             if config.low_latency {
-                encoder.set_property("preset", 5u32); // low-latency-hq
+                encoder.set_property_from_str("preset", "low-latency-hq");
                 encoder.set_property("zerolatency", true);
             }
         }
