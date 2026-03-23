@@ -21,9 +21,9 @@ pub fn rdp_scancode_to_evdev(code: u8, extended: bool) -> Option<u16> {
     }
 }
 
-/// Map standard (non-extended) XT scancodes to evdev keycodes.
+/// Map standard (non-extended) XT scancodes to XKB keycodes.
 ///
-/// For most standard keys, evdev keycode = XT scancode + 8.
+/// For most standard keys, XKB keycode = XT scancode + 8.
 fn standard_scancode_to_evdev(code: u8) -> Option<u16> {
     #[allow(clippy::match_same_arms)]
     let evdev = match code {

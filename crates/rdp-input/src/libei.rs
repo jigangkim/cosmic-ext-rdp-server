@@ -179,9 +179,9 @@ impl EiInput {
         };
         tracing::trace!(code, extended, evdev, "Key press");
         self.ensure_emulating();
-        // ei protocol uses evdev keycodes minus 8 (XKB offset)
+        // keymap returns XKB keycodes which ei protocol expects directly
         if let Some(ref keyboard) = self.keyboard {
-            keyboard.key(u32::from(evdev) - 8, ei::keyboard::KeyState::Press);
+            keyboard.key(u32::from(evdev), ei::keyboard::KeyState::Press);
         }
         self.lock_state.toggle_on_press(evdev);
         self.frame_and_flush();
@@ -222,7 +222,7 @@ impl EiInput {
             return;
         }
         self.ensure_emulating();
-        let xkb = u32::from(evdev) - 8;
+        let xkb = u32::from(evdev);
 
         // Press
         if let Some(ref keyboard) = self.keyboard {
@@ -253,7 +253,7 @@ impl EiInput {
         tracing::trace!(code, extended, evdev, "Key release");
         self.ensure_emulating();
         if let Some(ref keyboard) = self.keyboard {
-            keyboard.key(u32::from(evdev) - 8, ei::keyboard::KeyState::Released);
+            keyboard.key(u32::from(evdev), ei::keyboard::KeyState::Released);
         }
         self.frame_and_flush();
     }
