@@ -12,15 +12,22 @@ pub struct PortalStream {
     pub width: Option<i32>,
     /// Stream height reported by the portal (compositor logical coordinates).
     pub height: Option<i32>,
+    /// X position in the compositor coordinate space.
+    pub x: i32,
+    /// Y position in the compositor coordinate space.
+    pub y: i32,
 }
 
 impl From<&ScreencastStream> for PortalStream {
     fn from(stream: &ScreencastStream) -> Self {
         let (width, height) = stream.size().map_or((None, None), |(w, h)| (Some(w), Some(h)));
+        let (x, y) = stream.position().unwrap_or((0, 0));
         Self {
             node_id: stream.pipe_wire_node_id(),
             width,
             height,
+            x,
+            y,
         }
     }
 }

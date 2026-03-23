@@ -22,6 +22,7 @@ pub use portal::{start_screencast, PortalError, PortalSession, PortalStream};
 
 use ashpd::desktop::screencast::Screencast;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 /// Information about the captured desktop.
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ pub struct DesktopInfo {
     pub width: u16,
     /// Desktop height in pixels.
     pub height: u16,
-    /// `PipeWire` node ID.
+    /// `PipeWire` node ID (first stream).
     pub node_id: u32,
     /// Restore token for reconnecting to the same session.
     pub restore_token: Option<String>,
@@ -43,7 +44,8 @@ pub struct DesktopInfo {
 pub struct CaptureHandle {
     _session: ashpd::desktop::Session<'static, Screencast<'static>>,
     _proxy: Screencast<'static>,
-    _pw_stream: PwStream,
+    _pw_streams: Vec<PwStream>,
+    _compositor_task: Option<JoinHandle<()>>,
 }
 
 /// Start a screen capture session: portal negotiation + `PipeWire` stream.
@@ -51,6 +53,9 @@ pub struct CaptureHandle {
 /// Shows the system permission dialog if no valid `restore_token` is provided.
 /// Returns a handle (must be kept alive), a receiver for captured frames,
 /// and information about the captured desktop.
+///
+/// When `multi_monitor` is true and the portal returns multiple streams,
+/// a [`FrameCompositor`] merges them into a single virtual desktop.
 ///
 /// # Errors
 ///
@@ -65,46 +70,133 @@ pub async fn start_capture(
         .await
         .map_err(CaptureError::Portal)?;
 
-    let stream = &portal_session.streams[0];
-    let info = DesktopInfo {
-        width: stream
-            .width
-            .and_then(|w| u16::try_from(w).ok())
-            .unwrap_or(1920),
-        height: stream
-            .height
-            .and_then(|h| u16::try_from(h).ok())
-            .unwrap_or(1080),
-        node_id: stream.node_id,
-        restore_token: portal_session.restore_token.clone(),
-    };
-
     let PortalSession {
         session,
         proxy,
-        streams: _,
-        restore_token: _,
+        streams,
+        restore_token: token,
         pipewire_fd,
     } = portal_session;
 
-    let (pw_stream, frame_rx) =
-        PwStream::start(pipewire_fd, info.node_id, channel_capacity, swap_colors)
-            .map_err(CaptureError::PipeWire)?;
+    if streams.len() <= 1 {
+        // Single monitor: no compositor needed.
+        let stream = &streams[0];
+        let info = DesktopInfo {
+            width: stream
+                .width
+                .and_then(|w| u16::try_from(w).ok())
+                .unwrap_or(1920),
+            height: stream
+                .height
+                .and_then(|h| u16::try_from(h).ok())
+                .unwrap_or(1080),
+            node_id: stream.node_id,
+            restore_token: token,
+        };
 
-    let handle = CaptureHandle {
-        _session: session,
-        _proxy: proxy,
-        _pw_stream: pw_stream,
+        let (pw_stream, frame_rx) =
+            PwStream::start(pipewire_fd, info.node_id, channel_capacity, swap_colors)
+                .map_err(CaptureError::PipeWire)?;
+
+        tracing::info!(
+            width = info.width,
+            height = info.height,
+            node_id = info.node_id,
+            "Screen capture session started (single monitor)"
+        );
+
+        let handle = CaptureHandle {
+            _session: session,
+            _proxy: proxy,
+            _pw_streams: vec![pw_stream],
+            _compositor_task: None,
+        };
+
+        return Ok((handle, frame_rx, info));
+    }
+
+    // Multi-monitor: create a PipeWire stream per monitor, then compose.
+    tracing::info!(count = streams.len(), "Starting multi-monitor capture");
+
+    let monitor_infos: Vec<MonitorInfo> = streams
+        .iter()
+        .map(|s| MonitorInfo {
+            node_id: s.node_id,
+            width: s
+                .width
+                .and_then(|w| u16::try_from(w).ok())
+                .unwrap_or(1920),
+            height: s
+                .height
+                .and_then(|h| u16::try_from(h).ok())
+                .unwrap_or(1080),
+            x: s.x,
+            y: s.y,
+        })
+        .collect();
+
+    let (canvas_width, canvas_height) = bounding_box(&monitor_infos);
+
+    let mut pw_streams = Vec::with_capacity(streams.len());
+    let mut monitor_rxs = Vec::with_capacity(streams.len());
+
+    // Drop the initial FD — we open independent ones below.
+    drop(pipewire_fd);
+
+    for (i, stream) in streams.iter().enumerate() {
+        // Each PipeWire stream needs an independent FD from the portal,
+        // not a dup'd copy (dup'd FDs share the same socket buffer which
+        // would corrupt messages between PipeWire cores).
+        let fd = proxy
+            .open_pipe_wire_remote(&session)
+            .await
+            .map_err(|e| CaptureError::Portal(PortalError::PipeWireRemote(e)))?;
+
+        let (pw_stream, rx) =
+            PwStream::start(fd, stream.node_id, channel_capacity, swap_colors)
+                .map_err(CaptureError::PipeWire)?;
+
+        tracing::info!(
+            node_id = stream.node_id,
+            x = stream.x,
+            y = stream.y,
+            width = ?stream.width,
+            height = ?stream.height,
+            "Started PipeWire stream for monitor {i}"
+        );
+
+        pw_streams.push(pw_stream);
+        monitor_rxs.push(rx);
+    }
+
+    let (compositor, composed_rx) =
+        FrameCompositor::new(&monitor_infos, monitor_rxs, channel_capacity);
+    let compositor_task = tokio::spawn(compositor.run());
+
+    let info = DesktopInfo {
+        width: canvas_width,
+        height: canvas_height,
+        node_id: streams[0].node_id,
+        restore_token: token,
     };
 
     tracing::info!(
         width = info.width,
         height = info.height,
-        node_id = info.node_id,
-        "Screen capture session started"
+        monitors = streams.len(),
+        "Multi-monitor capture active (virtual desktop {}x{})",
+        canvas_width,
+        canvas_height,
     );
 
-    Ok((handle, frame_rx, info))
+    let handle = CaptureHandle {
+        _session: session,
+        _proxy: proxy,
+        _pw_streams: pw_streams,
+        _compositor_task: Some(compositor_task),
+    };
+
+    Ok((handle, composed_rx, info))
 }
 
 #[derive(Debug, thiserror::Error)]
