@@ -44,14 +44,23 @@ impl RdpServerInputHandler for StaticInputHandler {
 ///
 /// Wraps an [`EiInput`] backend and maps all RDP events to
 /// the appropriate reis/libei calls.
+///
+/// When a single off-origin monitor is captured, `x_offset` / `y_offset`
+/// translate RDP client coordinates (origin at 0,0) into compositor-absolute
+/// coordinates required by libei.
 pub struct LiveInputHandler {
     input: EiInput,
+    x_offset: i32,
+    y_offset: i32,
 }
 
 impl LiveInputHandler {
-    /// Create a new live input handler.
-    pub fn new(input: EiInput) -> Self {
-        Self { input }
+    /// Create a new live input handler with a compositor coordinate offset.
+    pub fn new(input: EiInput, x_offset: i32, y_offset: i32) -> Self {
+        if x_offset != 0 || y_offset != 0 {
+            tracing::info!(x_offset, y_offset, "Input coordinate offset applied");
+        }
+        Self { input, x_offset, y_offset }
     }
 }
 
@@ -103,10 +112,15 @@ impl RdpServerInputHandler for LiveInputHandler {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn mouse(&mut self, event: MouseEvent) {
         match event {
             MouseEvent::Move { x, y } => {
-                self.input.mouse_move(x, y);
+                // Translate RDP client coordinates (0-based) to compositor-absolute
+                // coordinates by adding the captured monitor's offset.
+                let abs_x = (i32::from(x) + self.x_offset).max(0) as u16;
+                let abs_y = (i32::from(y) + self.y_offset).max(0) as u16;
+                self.input.mouse_move(abs_x, abs_y);
             }
             MouseEvent::RelMove { x, y } => {
                 self.input.mouse_rel_move(x, y);

@@ -264,7 +264,11 @@ async fn run_live_or_fallback(
             let input_handler = match rdp_input::EiInput::new().await {
                 Ok(ei_input) => {
                     tracing::info!("Input injection active (libei)");
-                    server::LiveInputHandler::new(ei_input)
+                    server::LiveInputHandler::new(
+                        ei_input,
+                        desktop_info.x_offset,
+                        desktop_info.y_offset,
+                    )
                 }
                 Err(e) => {
                     tracing::warn!("Failed to initialize input injection: {e}");

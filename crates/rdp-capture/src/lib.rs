@@ -35,6 +35,14 @@ pub struct DesktopInfo {
     pub node_id: u32,
     /// Restore token for reconnecting to the same session.
     pub restore_token: Option<String>,
+    /// X offset of the captured region in compositor coordinate space.
+    ///
+    /// Non-zero when a single monitor is selected that is not at the origin
+    /// (e.g. the right monitor in a dual-monitor setup). Input coordinates
+    /// from the RDP client must be translated by this offset before injection.
+    pub x_offset: i32,
+    /// Y offset of the captured region in compositor coordinate space.
+    pub y_offset: i32,
 }
 
 /// Handle that keeps the capture session alive.
@@ -92,6 +100,8 @@ pub async fn start_capture(
                 .unwrap_or(1080),
             node_id: stream.node_id,
             restore_token: token,
+            x_offset: stream.x,
+            y_offset: stream.y,
         };
 
         let (pw_stream, frame_rx) =
@@ -178,6 +188,8 @@ pub async fn start_capture(
         height: canvas_height,
         node_id: streams[0].node_id,
         restore_token: token,
+        x_offset: 0,
+        y_offset: 0,
     };
 
     tracing::info!(
