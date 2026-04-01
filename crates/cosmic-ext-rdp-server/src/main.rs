@@ -263,7 +263,7 @@ async fn run_live_or_fallback(
 
             let input_handler = match rdp_input::EiInput::new().await {
                 Ok(ei_input) => {
-                    tracing::info!("Input injection active (libei)");
+                    tracing::info!("Input source auto-captured (libei via patched portal)");
                     server::LiveInputHandler::new(
                         ei_input,
                         desktop_info.x_offset,
@@ -351,20 +351,35 @@ fn is_localhost(ip: std::net::IpAddr) -> bool {
 /// persists across service restarts within the same login session but is
 /// cleared on logout.
 fn restore_token_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(|dir| PathBuf::from(dir).join("cosmic-ext-rdp-server").join("restore_token"))
+    // Use persistent config dir so the token survives reboots.
+    // Delete ~/.config/cosmic-rdp/restore_token to re-prompt display selection.
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap()).join(".config"));
+    Some(config_dir.join("cosmic-rdp").join("restore_token"))
 }
 
 /// Load a previously saved `ScreenCast` portal restore token.
 fn load_restore_token() -> Option<String> {
     let path = restore_token_path()?;
-    let token = std::fs::read_to_string(&path).ok()?;
-    let token = token.trim();
-    if token.is_empty() {
-        return None;
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => {
+            let token = contents.trim();
+            if token.is_empty() {
+                tracing::info!("Restore token file is empty, will prompt user for display selection");
+                return None;
+            }
+            tracing::info!(
+                path = %path.display(),
+                "Reusing restore token for display selection — delete {} to re-prompt",
+                path.display()
+            );
+            Some(token.to_string())
+        }
+        Err(_) => {
+            tracing::info!("No restore token found, will prompt user for display selection");
+            None
+        }
     }
-    tracing::info!(path = %path.display(), "Loaded ScreenCast restore token");
-    Some(token.to_string())
 }
 
 /// Run a background H.264 encoding loop for static display testing.
@@ -499,6 +514,9 @@ fn save_restore_token(token: &str) {
     if let Err(e) = std::fs::write(&path, token) {
         tracing::warn!("Failed to save restore token: {e}");
     } else {
-        tracing::info!(path = %path.display(), "Saved ScreenCast restore token");
+        tracing::info!(
+            path = %path.display(),
+            "Saved display selection restore token — future launches will skip display prompt"
+        );
     }
 }

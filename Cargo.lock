@@ -1499,6 +1499,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "clap",
+ "dirs",
  "ironrdp-cliprdr",
  "ironrdp-core",
  "ironrdp-displaycontrol",

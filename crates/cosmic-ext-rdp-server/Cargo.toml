@@ -60,6 +60,9 @@ tracing-subscriber.workspace = true
 # D-Bus
 zbus.workspace = true
 
+# Filesystem paths
+dirs = "6"
+
 # Error handling
 thiserror.workspace = true
 anyhow.workspace = true
