@@ -95,3 +95,29 @@ rdp-capture = { path = "crates/rdp-capture" }
 rdp-input = { path = "crates/rdp-input" }
 rdp-encode = { path = "crates/rdp-encode" }
 rdp-dbus = { path = "crates/rdp-dbus" }
+
+# IronRDP pinned to upstream 9a1ac30 plus the cherry-picked EGFX fix from
+# PR #1298 (tolerate unknown capability versions instead of failing decode) —
+# fixes EGFX/AVC420 negotiation with the macOS "Windows App" / Microsoft Remote
+# Desktop client. All ironrdp crates are redirected to the same fork branch so
+# they resolve to one consistent set (patching only ironrdp-egfx would create
+# duplicate package instances and type errors).
+# Fork: https://github.com/jigangkim/IronRDP branch egfx-unknown-capset-on-9a1ac30
+[patch."https://github.com/Devolutions/IronRDP"]
+ironrdp-acceptor = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-ainput = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-async = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-cliprdr = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-connector = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-core = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-displaycontrol = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-dvc = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-echo = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-egfx = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-error = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-graphics = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-pdu = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-rdpsnd = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-server = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-svc = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
+ironrdp-tokio = { git = "https://github.com/jigangkim/IronRDP", branch = "egfx-unknown-capset-on-9a1ac30" }
